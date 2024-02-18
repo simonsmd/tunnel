@@ -1,4 +1,4 @@
 /target
 data
-*.yml
-*.yaml
+config.yml
+config.yaml
