@@ -14,6 +14,7 @@ use config::{Config, Service};
 use tokio::task::JoinHandle;
 use tokio::{net::UdpSocket, signal, time::timeout};
 use tokio_util::sync::CancellationToken;
+use tracing::debug;
 use wireguard::Client;
 
 use tracing_subscriber::filter::LevelFilter;
@@ -108,6 +109,8 @@ fn load_clients(config: &Config) -> Result<Vec<Client>, Box<dyn Error>> {
         &mut clients,
     )?;
 
+    debug!(?clients, "successfully loaded client data");
+
     Ok(clients)
 }
 
@@ -161,6 +164,8 @@ async fn configure_caddy(config: &Config, clients: &[Client]) -> Result<(), Box<
                 }
             }
         }
+
+        debug!(?allowed_ips, "adding route for service {}", service.hostname);
 
         routes.push(caddy::Route {
             matcher: Some(caddy::Match::And(vec![
@@ -230,6 +235,8 @@ async fn configure_caddy(config: &Config, clients: &[Client]) -> Result<(), Box<
             )]),
         },
     };
+
+    debug!(config = ?data, "configurating caddy");
 
     let res = reqwest::Client::new()
         .post(format!("{}/load", config.caddy.api_url.clone()))

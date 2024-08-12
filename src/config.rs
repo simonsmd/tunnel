@@ -7,7 +7,7 @@ use std::{
 use config::{Config as ConfigB, ConfigError};
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
-use tracing::warn;
+use tracing::{debug, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct Id(String);
@@ -174,6 +174,8 @@ pub fn read(path: &str) -> Result<Config, ConfigError> {
     if config.services.is_empty() {
         warn!("no services configured");
     }
+
+    debug!(?config, "successfully read configuration");
 
     Ok(config)
 }

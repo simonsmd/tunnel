@@ -8,12 +8,12 @@ use serde::{
     Serialize,
 };
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Config {
     pub apps: App,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub enum App {
     #[serde(rename = "http")]
     Http {
@@ -23,14 +23,14 @@ pub enum App {
     },
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct HttpServer {
     pub listen: Vec<SocketAddr>,
     pub routes: Vec<Route>,
     pub automatic_https: Option<AutomaticHttps>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Route {
     #[serde(rename = "match", serialize_with = "serialize_match")]
     pub matcher: Option<Match>,
@@ -46,7 +46,7 @@ where
     seq.end()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[allow(dead_code)]
 pub enum Match {
     #[serde(rename = "client_ip")]
@@ -86,7 +86,7 @@ where
     map.end()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 #[serde(tag = "handler")]
 pub enum Handler {
     #[serde(rename = "reverse_proxy")]
@@ -98,23 +98,23 @@ pub enum Handler {
     StaticResponse { status_code: u16, body: String },
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Upstream {
     pub dial: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct ReverseProxyHeaders {
     pub request: Option<ReverseProxyHeadersRequest>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct ReverseProxyHeadersRequest {
     pub add: Option<HashMap<String, Vec<String>>>,
     pub set: Option<HashMap<String, Vec<String>>>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct AutomaticHttps {
     pub disable: bool,
     pub disable_redirects: bool,
