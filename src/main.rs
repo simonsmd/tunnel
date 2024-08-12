@@ -11,6 +11,7 @@ use std::{
 };
 
 use config::{Config, Service};
+use tokio::signal::unix::SignalKind;
 use tokio::task::JoinHandle;
 use tokio::{net::UdpSocket, signal, time::timeout};
 use tokio_util::sync::CancellationToken;
@@ -79,7 +80,13 @@ async fn run() -> Result<(), Box<dyn Error>> {
     configure_caddy(&config, &clients).await?;
     let (dns_cancellation_token, dns_join_handle) = setup_dns(&config).await?;
 
-    signal::ctrl_c().await?;
+    let mut sigterm = signal::unix::signal(SignalKind::terminate())?;
+
+    tokio::select! {
+        _ = signal::ctrl_c() => (),
+        _ = sigterm.recv() => ()
+    };
+
     dns_cancellation_token.cancel();
     interface.delete().await?;
     timeout(Duration::from_secs(1), dns_join_handle).await??;
@@ -165,7 +172,10 @@ async fn configure_caddy(config: &Config, clients: &[Client]) -> Result<(), Box<
             }
         }
 
-        debug!(?allowed_ips, "adding route for service {}", service.hostname);
+        debug!(
+            ?allowed_ips,
+            "adding route for service {}", service.hostname
+        );
 
         routes.push(caddy::Route {
             matcher: Some(caddy::Match::And(vec![
