@@ -141,7 +141,11 @@ impl Interface {
         let mut nlas = vec![
             LinkAttribute::IfName(interface_name.to_string()),
             LinkAttribute::LinkInfo(vec![LinkInfo::Kind(InfoKind::Wireguard)]),
-            LinkAttribute::Mtu(1420),
+            // 1280 MTU is the minimum (for IPv6) and should be best for compatability
+            // https://keremerkan.net/posts/wireguard-mtu-fixes/
+            // 1420 seemingly caused packets to be dropped in some cases (especially android
+            // clients)
+            LinkAttribute::Mtu(1280),
         ];
 
         request.message_mut().attributes.append(&mut nlas);
