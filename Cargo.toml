@@ -6,16 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [target.'cfg(target_os = "linux")'.dependencies]
-config = "0.14.0"
-dirs = "5.0.1"
-serde = "1.0.188"
-serde_yaml = "0.9.31"
-serde_json = "1.0.113"
+config = "0.15.14"
+dirs = "6.0.0"
+serde = "1.0.219"
+serde_yaml = "0.9.34"
+serde_json = "1.0.143"
 x25519-dalek = { version = "2", features = ["getrandom", "static_secrets"] }
-zeroize = "1.7.0"
-base64 = "0.21.7"
-thiserror = "1.0.56"
-cidr = { version = "0.2.2", features = ["serde"] }
+zeroize = "1.8.1"
+base64 = "0.22.1"
+thiserror = "2.0.16"
+cidr = { version = "0.3.1", features = ["serde"] }
 genetlink = "0.2.5"
 rtnetlink = "0.14.0"
 netlink-packet-core = "0.7.0"
@@ -23,15 +23,15 @@ netlink-packet-utils = "0.5.2"
 netlink-packet-generic = "0.3.3"
 netlink-packet-route = "0.19.0"
 netlink-packet-wireguard = "0.2.3"
-futures = "0.3.30"
-tokio = { version = "1.35", features = ["full"] }
-tokio-util = "0.7.10"
-hickory-server = { version = "0.24", features = ["hickory-resolver"] }
-hickory-resolver = { version = "0.24", features = ["webpki-roots", "dns-over-rustls"] }
-async-trait = "0.1.77"
+futures = "0.3.31"
+tokio = { version = "1.47", features = ["full"] }
+tokio-util = "0.7.16"
+hickory-server = { version = "0.25", features = ["resolver"] }
+hickory-resolver = { version = "0.25", features = ["webpki-roots", "tls-ring"] }
+async-trait = "0.1.89"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [lints.clippy]
 pedantic = "warn"

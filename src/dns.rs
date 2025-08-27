@@ -7,9 +7,9 @@ use std::{
 
 use async_trait::async_trait;
 use hickory_resolver::{
-    config::{NameServerConfigGroup, ResolverOpts},
+    config::{NameServerConfigGroup, ResolveHosts, ResolverOpts},
+    name_server::TokioConnectionProvider,
     proto::{
-        error::ProtoError,
         op::ResponseCode,
         rr::{LowerName, RData, RecordSet, RecordType},
     },
@@ -17,9 +17,10 @@ use hickory_resolver::{
 };
 use hickory_server::{
     authority::{
-        AuthorityObject, Catalog, LookupError, LookupObject, LookupOptions, LookupRecords,
+        AuthorityObject, Catalog, LookupControlFlow, LookupObject, LookupOptions, LookupRecords,
         MessageRequest, UpdateResult, ZoneType,
     },
+    proto::ProtoError,
     server::RequestInfo,
     store::forwarder::{ForwardAuthority, ForwardConfig},
     ServerFuture,
@@ -60,7 +61,7 @@ impl TunnelAuthority {
             if query_type == RecordType::A {
                 if let Some(ip) = ipv4 {
                     trace!("found tunnel local A record for {}: {}", name, ip);
-                    let mut records = RecordSet::new(&name.clone().into(), RecordType::A, 0);
+                    let mut records = RecordSet::new(name.clone().into(), RecordType::A, 0);
                     records.add_rdata(RData::A((*ip).into()));
                     return Some(Box::new(LookupRecords::new(
                         lookup_options,
@@ -72,7 +73,7 @@ impl TunnelAuthority {
             if query_type == RecordType::AAAA {
                 if let Some(ip) = ipv6 {
                     trace!("found tunnel local AAAA record for {}: {}", name, ip);
-                    let mut records = RecordSet::new(&name.clone().into(), RecordType::AAAA, 0);
+                    let mut records = RecordSet::new(name.clone().into(), RecordType::AAAA, 0);
                     records.add_rdata(RData::AAAA((*ip).into()));
                     return Some(Box::new(LookupRecords::new(
                         lookup_options,
@@ -89,15 +90,8 @@ impl TunnelAuthority {
 
 #[async_trait]
 impl AuthorityObject for TunnelAuthority {
-    fn box_clone(&self) -> Box<dyn AuthorityObject> {
-        Box::new(Self {
-            records: self.records.clone(),
-            forward_authority: self.forward_authority.box_clone(),
-        })
-    }
-
     fn zone_type(&self) -> ZoneType {
-        ZoneType::Forward
+        ZoneType::External
     }
 
     fn is_axfr_allowed(&self) -> bool {
@@ -116,15 +110,15 @@ impl AuthorityObject for TunnelAuthority {
     async fn lookup(
         &self,
         name: &LowerName,
-        query_type: RecordType,
+        rtype: RecordType,
         lookup_options: LookupOptions,
-    ) -> Result<Box<dyn LookupObject>, LookupError> {
-        if let Some(lo) = self.inner_lookup(name, query_type, lookup_options).await {
-            return Ok(lo);
+    ) -> LookupControlFlow<Box<dyn LookupObject>> {
+        if let Some(lo) = self.inner_lookup(name, rtype, lookup_options).await {
+            return LookupControlFlow::Break(Ok(lo));
         }
 
         self.forward_authority
-            .lookup(name, query_type, lookup_options)
+            .lookup(name, rtype, lookup_options)
             .await
     }
 
@@ -132,7 +126,7 @@ impl AuthorityObject for TunnelAuthority {
         &self,
         request_info: RequestInfo<'_>,
         lookup_options: LookupOptions,
-    ) -> Result<Box<dyn LookupObject>, LookupError> {
+    ) -> LookupControlFlow<Box<dyn LookupObject>> {
         if let Some(lo) = self
             .inner_lookup(
                 request_info.query.name(),
@@ -141,7 +135,7 @@ impl AuthorityObject for TunnelAuthority {
             )
             .await
         {
-            return Ok(lo);
+            return LookupControlFlow::Break(Ok(lo));
         }
 
         self.forward_authority
@@ -149,14 +143,34 @@ impl AuthorityObject for TunnelAuthority {
             .await
     }
 
+    async fn consult(
+        &self,
+        name: &LowerName,
+        rtype: RecordType,
+        lookup_options: LookupOptions,
+        last_result: LookupControlFlow<Box<dyn LookupObject>>,
+    ) -> LookupControlFlow<Box<dyn LookupObject>> {
+        if let Some(lo) = self.inner_lookup(name, rtype, lookup_options).await {
+            return LookupControlFlow::Break(Ok(lo));
+        }
+
+        self.forward_authority
+            .consult(name, rtype, lookup_options, last_result)
+            .await
+    }
+
     async fn get_nsec_records(
         &self,
         name: &LowerName,
         lookup_options: LookupOptions,
-    ) -> Result<Box<dyn LookupObject>, LookupError> {
+    ) -> LookupControlFlow<Box<dyn LookupObject>> {
         self.forward_authority
             .get_nsec_records(name, lookup_options)
             .await
+    }
+
+    fn can_validate_dnssec(&self) -> bool {
+        false
     }
 }
 
@@ -167,7 +181,7 @@ pub struct Server {
 impl Server {
     pub fn new() -> Self {
         let mut resolver_opts = ResolverOpts::default();
-        resolver_opts.use_hosts_file = false;
+        resolver_opts.use_hosts_file = ResolveHosts::Never;
 
         // TODO: configurable upstream dns
         let forward_config = ForwardConfig {
@@ -183,14 +197,16 @@ impl Server {
             options: Some(resolver_opts),
         };
 
-        let forward_authority = ForwardAuthority::try_from_config(
-            Name::from_str(".").unwrap(),
-            ZoneType::Forward,
-            &forward_config,
+        // Name::from_str(".").unwrap(),
+        // ZoneType::External,
+        let forward_authority = ForwardAuthority::builder_with_config(
+            forward_config,
+            TokioConnectionProvider::default(),
         )
+        .build()
         .unwrap();
 
-        let tunnel_authority = TunnelAuthority::new(Box::new(Arc::new(forward_authority)));
+        let tunnel_authority = TunnelAuthority::new(Box::new(forward_authority));
 
         Self {
             authority: Arc::new(tunnel_authority),
@@ -210,7 +226,7 @@ impl Server {
         let mut catalog = Catalog::new();
         catalog.upsert(
             LowerName::from_str(".").unwrap(),
-            self.authority.box_clone(),
+            vec![self.authority.clone()],
         );
         let mut server = ServerFuture::new(catalog);
 
