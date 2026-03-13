@@ -209,40 +209,70 @@ async fn configure_caddy(config: &Config, clients: &[Client]) -> Result<(), Box<
         }],
     });
 
+    let listen_port = if config.tls.as_ref().is_some_and(|certs| !certs.is_empty()) {
+        config.https_listen_port
+    } else {
+        config.http_listen_port
+    };
     let mut listen_addresses = Vec::with_capacity(2);
     if let Some(ipv4) = config.wireguard.ipv4 {
         listen_addresses.push(SocketAddr::V4(SocketAddrV4::new(
             ipv4.address(),
-            config.http_listen_port,
+            listen_port,
         )));
     }
     if let Some(ipv6) = config.wireguard.ipv6 {
         listen_addresses.push(SocketAddr::V6(SocketAddrV6::new(
             ipv6.address(),
-            config.http_listen_port,
+            listen_port,
             0,
             0,
         )));
     }
 
+    // if tls certificates are defined in config enable tls for all routes by defining one tls
+    // connection policy matching matching all requests
+    let tls_connection_policies = match &config.tls {
+        Some(certs) if !certs.is_empty() => Some(vec![caddy::TlsConnectionPolicy {}]),
+        _ => None,
+    };
+
+    let certificates: Option<Vec<_>> = config.tls.as_ref().map(|certs| {
+        certs
+            .iter()
+            .map(|cert| caddy::TlsCertificateFile {
+                certificate: cert.certificate.clone(),
+                key: cert.key.clone(),
+            })
+            .collect()
+    });
+
     let data = caddy::Config {
-        apps: caddy::App::Http {
-            http_port: None,
-            https_port: None,
-            servers: HashMap::from([(
-                "test".to_owned(),
-                caddy::HttpServer {
-                    listen: listen_addresses,
-                    routes,
-                    automatic_https: Some(caddy::AutomaticHttps {
-                        disable: true,
-                        disable_redirects: false,
-                        disable_certificates: false,
-                        skip: None,
-                        skip_certificates: None,
-                    }),
+        apps: caddy::Apps {
+            http: caddy::HttpApp {
+                http_port: None,
+                https_port: None,
+                servers: HashMap::from([(
+                    "tun".to_owned(),
+                    caddy::HttpServer {
+                        listen: listen_addresses,
+                        routes,
+                        automatic_https: Some(caddy::AutomaticHttps {
+                            disable: false,
+                            disable_redirects: false,
+                            disable_certificates: true,
+                            skip: None,
+                            skip_certificates: None,
+                        }),
+                        tls_connection_policies,
+                    },
+                )]),
+            },
+            tls: certificates.map(|certs| caddy::TlsApp {
+                certificates: caddy::TlsCertificates {
+                    load_files: Some(certs),
                 },
-            )]),
+            }),
         },
     };
 

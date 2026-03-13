@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
+    path::PathBuf,
 };
 
 use serde::{
@@ -10,17 +11,21 @@ use serde::{
 
 #[derive(Serialize, Debug)]
 pub struct Config {
-    pub apps: App,
+    pub apps: Apps,
 }
 
 #[derive(Serialize, Debug)]
-pub enum App {
-    #[serde(rename = "http")]
-    Http {
-        http_port: Option<u16>,
-        https_port: Option<u16>,
-        servers: HashMap<String, HttpServer>,
-    },
+pub struct Apps {
+    pub http: HttpApp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tls: Option<TlsApp>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct HttpApp {
+    pub http_port: Option<u16>,
+    pub https_port: Option<u16>,
+    pub servers: HashMap<String, HttpServer>,
 }
 
 #[derive(Serialize, Debug)]
@@ -28,6 +33,7 @@ pub struct HttpServer {
     pub listen: Vec<SocketAddr>,
     pub routes: Vec<Route>,
     pub automatic_https: Option<AutomaticHttps>,
+    pub tls_connection_policies: Option<Vec<TlsConnectionPolicy>>,
 }
 
 #[derive(Serialize, Debug)]
@@ -37,6 +43,7 @@ pub struct Route {
     pub handle: Vec<Handler>,
 }
 
+// always serialize match to array (as required by caddy config schema)
 fn serialize_match<S>(matcher: &Option<Match>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
@@ -69,10 +76,10 @@ where
     for m in match_list {
         match m {
             Match::ClientIp { ranges } => {
-                map.serialize_entry("client_ip", &HashMap::from([("ranges", ranges)]))?
+                map.serialize_entry("client_ip", &HashMap::from([("ranges", ranges)]))?;
             }
             Match::RemoteIp { ranges } => {
-                map.serialize_entry("remote_ip", &HashMap::from([("ranges", ranges)]))?
+                map.serialize_entry("remote_ip", &HashMap::from([("ranges", ranges)]))?;
             }
             Match::Host(hosts) => map.serialize_entry("host", &hosts)?,
             Match::And(_) => return Err(serde::ser::Error::custom("Cannot nest and match")),
@@ -81,7 +88,7 @@ where
                     "Cannot nest or match inside and match",
                 ))
             }
-        };
+        }
     }
     map.end()
 }
@@ -115,10 +122,30 @@ pub struct ReverseProxyHeadersRequest {
 }
 
 #[derive(Serialize, Debug)]
+pub struct TlsConnectionPolicy {}
+
+#[derive(Serialize, Debug)]
 pub struct AutomaticHttps {
     pub disable: bool,
     pub disable_redirects: bool,
     pub disable_certificates: bool,
     pub skip: Option<Vec<String>>,
     pub skip_certificates: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct TlsApp {
+    pub certificates: TlsCertificates,
+}
+
+#[derive(Serialize, Debug)]
+pub struct TlsCertificates {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub load_files: Option<Vec<TlsCertificateFile>>,
+}
+
+#[derive(Serialize, Debug)]
+pub struct TlsCertificateFile {
+    pub certificate: PathBuf,
+    pub key: PathBuf,
 }

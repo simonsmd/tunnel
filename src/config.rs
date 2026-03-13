@@ -65,9 +65,11 @@ impl AsRef<Path> for Id {
 pub struct Config {
     pub data_dir: PathBuf,
     pub wireguard: Wireguard,
+    pub tls: Option<Vec<Certificate>>,
     pub caddy: Caddy,
     pub clients: Vec<Client>,
     pub http_listen_port: u16,
+    pub https_listen_port: u16,
     pub services: Vec<Service>,
 }
 
@@ -78,6 +80,12 @@ pub struct Wireguard {
     pub server_endpoint: String,
     pub ipv4: Option<cidr::Ipv4Inet>,
     pub ipv6: Option<cidr::Ipv6Inet>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Certificate {
+    pub certificate: PathBuf,
+    pub key: PathBuf,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -96,25 +104,6 @@ pub struct Service {
     pub hostname: String,
     pub address: String,
     pub groups: Vec<Id>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ServiceHttps {
-    pub redirect_http: bool,
-    pub certificate: Option<Certificate>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum Certificate {
-    Auto,
-    Selfsigned {
-        path: PathBuf,
-    },
-    LetsEncrypt {
-        email: String,
-        // TODO: complete
-    },
 }
 
 pub fn read(path: &str) -> Result<Config, ConfigError> {
@@ -136,6 +125,7 @@ pub fn read(path: &str) -> Result<Config, ConfigError> {
                 .unwrap(),
         )?
         .set_default("http_listen_port", 80)?
+        .set_default("https_listen_port", 443)?
         .set_default("caddy.api_url", "http://localhost:2019")?
         .build()?
         .try_deserialize()?;
