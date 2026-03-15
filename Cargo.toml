@@ -31,7 +31,7 @@ hickory-resolver = { version = "0.25", features = ["webpki-roots", "tls-ring"] }
 async-trait = "0.1.89"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
 
 [lints.clippy]
 pedantic = "warn"
