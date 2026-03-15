@@ -1,7 +1,6 @@
 use core::fmt;
 use std::{
-    collections::HashSet,
-    path::{Path, PathBuf},
+    collections::HashSet, path::{Path, PathBuf}
 };
 
 use config::{Config as ConfigB, ConfigError};
@@ -57,6 +56,12 @@ impl<'de> Deserialize<'de> for Id {
 
 impl AsRef<Path> for Id {
     fn as_ref(&self) -> &Path {
+        self.0.as_ref()
+    }
+}
+
+impl AsRef<str> for Id {
+    fn as_ref(&self) -> &str{
         self.0.as_ref()
     }
 }

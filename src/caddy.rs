@@ -44,6 +44,7 @@ pub struct Route {
 }
 
 // always serialize match to array (as required by caddy config schema)
+#[allow(clippy::ref_option)]
 fn serialize_match<S>(matcher: &Option<Match>, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,

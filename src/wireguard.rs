@@ -4,23 +4,19 @@ use std::net::IpAddr;
 use base64::DecodeError;
 use base64::{engine::general_purpose::STANDARD as b64, Engine};
 use cidr::{Ipv4Inet, Ipv6Inet};
-use netlink_packet_route::link::LinkLayerType;
-use netlink_packet_route::link::{InfoKind, LinkAttribute, LinkInfo};
-use netlink_packet_wireguard::constants::{AF_INET, AF_INET6};
-use netlink_packet_wireguard::nlas::{WgAllowedIp, WgPeer};
+use futures::{StreamExt, TryStreamExt};
+use netlink_packet_core::{NetlinkMessage, NetlinkPayload, NLM_F_ACK, NLM_F_REQUEST};
+use netlink_packet_generic::GenlMessage;
+use netlink_packet_wireguard::{
+    WireguardAddressFamily, WireguardAllowedIp, WireguardAllowedIpAttr, WireguardAttribute,
+    WireguardCmd, WireguardMessage, WireguardPeer, WireguardPeerAttribute,
+};
+use rtnetlink::{LinkUnspec, LinkWireguard};
 use thiserror::Error;
 use tracing::{debug, info, instrument, trace};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::config::Id;
-
-use futures::{StreamExt, TryStreamExt};
-use netlink_packet_core::{NetlinkMessage, NetlinkPayload, NLM_F_ACK, NLM_F_REQUEST};
-use netlink_packet_generic::GenlMessage;
-use netlink_packet_wireguard::{
-    nlas::{WgAllowedIpAttrs, WgDeviceAttrs, WgPeerAttrs},
-    Wireguard, WireguardCmd,
-};
 
 /// Wireguard key
 #[derive(Clone, Zeroize, ZeroizeOnDrop)]
@@ -106,7 +102,7 @@ pub enum Error {
     #[error("netlink error: {0}")]
     RTNetlink(#[from] rtnetlink::Error),
     #[error("netlink decode error: {0}")]
-    NetlinkDecode(#[from] netlink_packet_utils::DecodeError),
+    NetlinkDecode(#[from] netlink_packet_core::DecodeError),
     #[error("wireguard interface {0} not found")]
     InterfaceNotFound(String),
 }
@@ -135,21 +131,19 @@ impl Interface {
 
         // Create wireguard interface
         debug!("creating link");
-        let mut request = handle.link().add();
-        request.message_mut().header.link_layer_type = LinkLayerType::Netrom;
-
-        let mut nlas = vec![
-            LinkAttribute::IfName(interface_name.to_string()),
-            LinkAttribute::LinkInfo(vec![LinkInfo::Kind(InfoKind::Wireguard)]),
-            // 1280 MTU is the minimum (for IPv6) and should be best for compatability
-            // https://keremerkan.net/posts/wireguard-mtu-fixes/
-            // 1420 seemingly caused packets to be dropped in some cases (especially android
-            // clients)
-            LinkAttribute::Mtu(1280),
-        ];
-
-        request.message_mut().attributes.append(&mut nlas);
-        request.execute().await?;
+        handle
+            .link()
+            .add(
+                LinkWireguard::new(interface_name.as_ref())
+                    // 1280 MTU is the minimum (for IPv6) and should be best for compatability
+                    // https://keremerkan.net/posts/wireguard-mtu-fixes/
+                    // 1420 seemingly caused packets to be dropped in some cases (especially android
+                    // clients)
+                    .mtu(1280)
+                    .build(),
+            )
+            .execute()
+            .await?;
 
         configure_interface(&interface_name, &key, listen_port, clients).await?;
 
@@ -189,7 +183,11 @@ impl Interface {
 
             // Bring link up
             debug!("bringing up link");
-            handle.link().set(link.header.index).up().execute().await?;
+            handle
+                .link()
+                .set(LinkUnspec::new_with_index(link.header.index).up().build())
+                .execute()
+                .await?;
             info!("interface created");
         } else {
             return Err(Error::InterfaceNotFound(interface_name.to_string()));
@@ -281,39 +279,39 @@ async fn configure_interface(
 
             let mut allowed_ips = Vec::new();
             if let Some(ipv4) = c.ipv4 {
-                allowed_ips.push(WgAllowedIp(vec![
-                    WgAllowedIpAttrs::Family(AF_INET),
-                    WgAllowedIpAttrs::IpAddr(IpAddr::V4(ipv4.address())),
-                    WgAllowedIpAttrs::Cidr(32),
+                allowed_ips.push(WireguardAllowedIp(vec![
+                    WireguardAllowedIpAttr::Family(WireguardAddressFamily::Ipv4),
+                    WireguardAllowedIpAttr::IpAddr(IpAddr::V4(ipv4.address())),
+                    WireguardAllowedIpAttr::Cidr(32),
                 ]));
             }
 
             if let Some(ipv6) = c.ipv6 {
-                allowed_ips.push(WgAllowedIp(vec![
-                    WgAllowedIpAttrs::Family(AF_INET6),
-                    WgAllowedIpAttrs::IpAddr(IpAddr::V6(ipv6.address())),
-                    WgAllowedIpAttrs::Cidr(128),
+                allowed_ips.push(WireguardAllowedIp(vec![
+                    WireguardAllowedIpAttr::Family(WireguardAddressFamily::Ipv6),
+                    WireguardAllowedIpAttr::IpAddr(IpAddr::V6(ipv6.address())),
+                    WireguardAllowedIpAttr::Cidr(128),
                 ]));
             }
 
-            WgPeer(vec![
-                WgPeerAttrs::PublicKey(c.key.public_key_to_bytes()),
-                WgPeerAttrs::AllowedIps(allowed_ips),
+            WireguardPeer(vec![
+                WireguardPeerAttribute::PublicKey(c.key.public_key_to_bytes()),
+                WireguardPeerAttribute::AllowedIps(allowed_ips),
             ])
         })
         .collect();
 
-    let nlas = vec![
-        WgDeviceAttrs::IfName(interface_name.to_string()),
-        WgDeviceAttrs::ListenPort(listen_port),
-        WgDeviceAttrs::Fwmark(listen_port.into()),
-        WgDeviceAttrs::PrivateKey(key.private_key_to_bytes()),
-        WgDeviceAttrs::Peers(peers),
+    let attributes = vec![
+        WireguardAttribute::IfName(interface_name.to_string()),
+        WireguardAttribute::ListenPort(listen_port),
+        WireguardAttribute::Fwmark(listen_port.into()),
+        WireguardAttribute::PrivateKey(key.private_key_to_bytes()),
+        WireguardAttribute::Peers(peers),
     ];
 
-    let genlmsg: GenlMessage<Wireguard> = GenlMessage::from_payload(Wireguard {
+    let genlmsg: GenlMessage<WireguardMessage> = GenlMessage::from_payload(WireguardMessage {
         cmd: WireguardCmd::SetDevice,
-        nlas,
+        attributes,
     });
 
     let mut nlmsg = NetlinkMessage::from(genlmsg);
@@ -325,7 +323,7 @@ async fn configure_interface(
         let rx_packet = result?;
         if let NetlinkPayload::Error(e) = rx_packet.payload {
             return Err(e.to_io().into());
-        };
+        }
     }
 
     Ok(())
